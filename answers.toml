@@ -13,12 +13,9 @@ gateway = "192.168.1.254"
 
 [disk-setup]
 filesystem = "ext4"
-
-
-[post-installation-webhook]
-url = "https://my.endpoint.local/postinst"
-cert_fingerprint = "AA:E8:CB:95:B1:..."
+filter = "size>450G AND size<600G AND removable=0 AND rotational=0"
 
 [first-boot]
-source = "from-iso"
-ordering = "before-network"
+source = "from-url"
+ordering = "network-online"
+url = "https://raw.githubusercontent.com/buddy9880/pve-unattended-install/refs/heads/main/firstboot.sh"
