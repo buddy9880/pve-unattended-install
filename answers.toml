@@ -1,4 +1,5 @@
 [global]
+mailto = "mail@no.invalid"
 keyboard = "en-us"
 country = "us"
 fqdn = "pve-temp.local"
@@ -11,11 +12,20 @@ cidr = "192.168.1.47/24"
 dns = "1.1.1.1"
 gateway = "192.168.1.254"
 
+[network.filter]
+link = "up"
+
 [disk-setup]
 filesystem = "ext4"
-filter = "size>450G AND size<600G AND removable=0 AND rotational=0"
+
+[disk-setup.filter]
+removable = "0"
+rotational = "0"
+min-size = "450G"
+max-size = "600G"
+
 
 [first-boot]
 source = "from-url"
 ordering = "network-online"
-url = "https://raw.githubusercontent.com/buddy9880/pve-unattended-install/refs/heads/main/firstboot.sh"
+url = "https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/firstboot.sh"
