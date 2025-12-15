@@ -1,0 +1,24 @@
+[global]
+keyboard = "en-us"
+country = "us"
+fqdn = "pve-temp.local"
+timezone = "America/New_York"
+root-password-hashed = "$6$GnEOkKKvgD8wEgQQ$ArxCjjXtfa6AGOFxs5dN.fjygr91WOxW1KPDyyGjsnvlWY7i1d1V9IKUlBjR075Ia9nY5esfC9MAnekCTmVPF0"
+
+[network]
+source = "from-answer"
+cidr = "192.168.1.47/24"
+dns = "1.1.1.1"
+gateway = "192.168.1.254"
+
+[disk-setup]
+filesystem = "ext4"
+
+
+[post-installation-webhook]
+url = "https://my.endpoint.local/postinst"
+cert_fingerprint = "AA:E8:CB:95:B1:..."
+
+[first-boot]
+source = "from-iso"
+ordering = "before-network"
