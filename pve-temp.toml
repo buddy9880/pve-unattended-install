@@ -23,4 +23,4 @@ filter.DEVNAME = "/dev/nvme0n1"
 [first-boot]
 source = "from-url"
 ordering = "fully-up"
-url = "https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/firstboot.sh"
+url = "http://buddy-laptop.local:8080/firstboot.sh"
