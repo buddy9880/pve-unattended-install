@@ -1,26 +1,28 @@
 # Proxmox Unattended Install
 
 Automated Proxmox VE installation using answer files and a local webserver.  This 
-was created for my own personal use.  I originally made this public hoping I could 
-just fetch my answers files from github but HTTP POST is not supported unfortunately.
-I decided to leave it public just in case anyone wants to use my file as a template.
+was created for my own personal setup.  I couldn't just have the proxmox fetch the
+answer file directly from github as github does not support HTTP POST.  The pi-webserver 
+script creates a webserver on a raspberry pi that pull the latest files from github and responds
+to the HTTP POST request from proxmox.
 
 # Files
-- **pve-temp.toml** - Answer file with network, disk, and system configuration
+- **pve-temp.toml** - Answer file for my test environment
+- **answer.toml** - Answer file fetched from the pi webserver
 - **firstboot.sh** - Script that installs SSH keys from GitHub on first boot
-- **webserver.py** - HTTP server that serves both files during installation
+- **webserver.py** - HTTP server that serves files from its current directory
+- **pi-webserver.py** -HTTP server that fetches files from github and serves them
+- **proxmox-webserver.service** - systemd service file
 
 # Create the ISO with the hostname or ip address (WSL)
-proxmox-auto-install-assistant prepare-iso /path/to/proxmox.iso \
-  --fetch-from http \
-  --url "http://buddy-laptop.local:8080/"
+proxmox-auto-install-assistant prepare-iso /mnt/c/Users/buddy/Downloads/ --fetch-from http --url "http://<server_ip>:8080/answer"
 
-# Start the webserver from directory where files are saved, outside of WSL
+# Start the webserver from directory where files are saved
 py ./webserver.py
 
 # The webserver serves HTTP POST and GET
-http://buddy-laptop.local:8080/
-http://buddy-laptop.local:8080/firstboot.sh
+http://<server_ip>:8080/answer
+http://<server_ip>:8080/firstboot
 
 # The firstboot script can also be fetched from github
 https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/firstboot.sh
