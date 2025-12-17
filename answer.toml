@@ -1,0 +1,26 @@
+[global]
+mailto = "mail@no.invalid"
+keyboard = "en-us"
+country = "us"
+fqdn = "pve-temp.local"
+timezone = "America/New_York"
+root-password-hashed = "$6$GnEOkKKvgD8wEgQQ$ArxCjjXtfa6AGOFxs5dN.fjygr91WOxW1KPDyyGjsnvlWY7i1d1V9IKUlBjR075Ia9nY5esfC9MAnekCTmVPF0"
+
+[network]
+# source = "from-dhcp"
+source = "from-answer"
+cidr = "192.168.1.47/24"
+dns = "1.1.1.1"
+gateway = "192.168.1.254"
+#filter.ID_NET_NAME_PATH = "enp0s31f6"
+filter.SUBSYSTEM = "net"
+
+[disk-setup]
+filesystem = "ext4"
+filter.DEVNAME = "/dev/nvme0n1"
+# filter.ID_MODEL = "*NVMe*"
+
+[first-boot]
+source = "from-url"
+ordering = "fully-up"
+url = "http://192.168.1.253:8080/firstboot"

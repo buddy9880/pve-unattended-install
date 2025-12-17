@@ -1,0 +1,21 @@
+[Unit]
+Description=Proxmox Unattended Install Webserver
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/proxmox-server
+ExecStart=/usr/bin/python3 /home/pi/proxmox-server/pi-webserver.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
