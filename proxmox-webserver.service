@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/proxmox-server
-ExecStart=/usr/bin/python3 /home/pi/proxmox-server/pi-webserver.py
+User=buddy
+WorkingDirectory=/home/buddy/proxmox-server
+ExecStart=/usr/bin/python3 /home/buddy/proxmox-server/pi-webserver.py
 Restart=always
 RestartSec=5
 StandardOutput=journal

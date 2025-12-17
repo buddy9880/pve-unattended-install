@@ -73,8 +73,8 @@ class Handler(BaseHTTPRequestHandler):
             # Fetch file from GitHub
             data = fetch_from_github(github_filename)
             
-            # Determine content type
-            content_type = "application/x-sh" if path == "/firstboot" else "text/plain; charset=utf-8"
+            # Determine content type - use plain text for browser viewing
+            content_type = "text/plain; charset=utf-8"
             
             # Send the file
             self._send_file(data, content_type)
