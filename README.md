@@ -1,6 +1,9 @@
 # Proxmox Unattended Install
 
-Automated Proxmox VE installation using answer files and a local webserver.
+Automated Proxmox VE installation using answer files and a local webserver.  This 
+was created for my own personal use.  I originally made this public hoping I could 
+just fetch my answers files from github but HTTP POST is not supported unfortunately.
+I decided to leave it public just in case anyone wants to use my file as a template.
 
 # Files
 - **pve-temp.toml** - Answer file with network, disk, and system configuration
