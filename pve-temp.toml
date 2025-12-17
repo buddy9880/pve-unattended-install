@@ -17,10 +17,10 @@ filter.SUBSYSTEM = "net"
 
 [disk-setup]
 filesystem = "ext4"
-# filter.DEVNAME = "/dev/nvme0n1"
-filter.ID_MODEL = "*NVMe*"
+filter.DEVNAME = "/dev/nvme0n1"
+# filter.ID_MODEL = "*NVMe*"
 
 [first-boot]
 source = "from-url"
-ordering = "network-online"
+ordering = "fully-up"
 url = "https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/firstboot.sh"
