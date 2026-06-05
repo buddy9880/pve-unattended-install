@@ -1,7 +1,7 @@
 # Proxmox Unattended Install
 
 Automated Proxmox VE installation using answer files and a local webserver.  This 
-was created for my own personal setup.  I couldn't just have the proxmox fetch the
+was created for my own personal setup.  I couldn't just have proxmox fetch the
 answer file directly from github as github does not support HTTP POST.  The pi-webserver 
 script creates a webserver on a raspberry pi that pull the latest files from github and responds
 to the HTTP POST request from proxmox.
