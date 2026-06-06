@@ -1,0 +1,21 @@
+node_modules/
+.wrangler/
+
+# Local Wrangler secret files. Do not commit real answer files or secrets.
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+answer.toml
+answer-token.txt
+*.local
+*.secret
+*.secrets
+
+# Logs and OS/editor noise.
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db

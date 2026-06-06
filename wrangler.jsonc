@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pve-answer-worker",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-06-05",
+  "workers_dev": false,
+  "preview_urls": false,
+  "secrets": {
+    "required": ["ANSWER_TOML", "ANSWER_TOKEN"]
+  }
+}
