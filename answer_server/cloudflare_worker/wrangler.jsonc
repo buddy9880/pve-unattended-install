@@ -10,6 +10,6 @@
     "head_sampling_rate": 1
   },
   "vars": {
-    "GITHUB_RAW_BASE_URL": "https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main"
+    "GITHUB_RAW_BASE_URL": "https://raw.githubusercontent.com/buddy9880/pve-unattended-install/refactor-cloudflare-answer-server"
   }
 }
