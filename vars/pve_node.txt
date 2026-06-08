@@ -1,0 +1,7 @@
+nodes:
+    pve-main:
+        mac_address: 90:8d:6e:8c:45:cf
+        ip_address: 192.168.1.200
+    pve-temp:
+        mac_address: 10:62:e5:00:17:8d
+        ip_address: 192.168.1.47

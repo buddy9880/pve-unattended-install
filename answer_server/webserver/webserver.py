@@ -4,8 +4,9 @@ from datetime import datetime
 
 PORT = 8080
 ROOT = os.getcwd()
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SERVE_FILE = None  # Will be set from user input
-FIRSTBOOT_FILE = "firstboot.sh"  # Fixed filename in current directory
+FIRSTBOOT_FILE = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "firstboot.sh"))
 
 def read_file(path) -> bytes:
     with open(path, "rb") as f:
@@ -28,7 +29,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             # Route: /firstboot.sh
             if self.path == "/firstboot.sh":
-                firstboot_path = os.path.join(ROOT, FIRSTBOOT_FILE)
+                firstboot_path = FIRSTBOOT_FILE
                 if not os.path.isfile(firstboot_path):
                     self.send_error(404, f"{FIRSTBOOT_FILE} not found")
                     return
@@ -67,11 +68,11 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     # Check if firstboot.sh exists
-    firstboot_path = os.path.join(ROOT, FIRSTBOOT_FILE)
+    firstboot_path = FIRSTBOOT_FILE
     firstboot_exists = os.path.isfile(firstboot_path)
     
     if not firstboot_exists:
-        print(f"WARNING: {FIRSTBOOT_FILE} not found in current directory!")
+        print(f"WARNING: {FIRSTBOOT_FILE} not found!")
         print(f"         Requests to /firstboot.sh will return 404\n")
     
     while True:
@@ -95,13 +96,13 @@ if __name__ == "__main__":
             print(f"{'='*60}")
             print(f"Files:")
             print(f"  - Answer file:      {filename}")
-            print(f"  - Firstboot script: {FIRSTBOOT_FILE} {'✓' if firstboot_exists else '✗ (not found)'}")
+            print(f"  - Firstboot script: {os.path.basename(FIRSTBOOT_FILE)} {'✓' if firstboot_exists else '✗ (not found)'}")
             print(f"\nEndpoints:")
             print(f"  POST /              → {filename}")
             print(f"  GET  /              → {filename}")
             print(f"  GET  /answers       → {filename}")
             if firstboot_exists:
-                print(f"  GET  /firstboot.sh  → {FIRSTBOOT_FILE}")
+                print(f"  GET  /firstboot.sh  → {os.path.basename(FIRSTBOOT_FILE)}")
             print(f"{'='*60}\n")
             HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
             break

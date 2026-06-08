@@ -1,17 +1,23 @@
 # Raspberry Pi GitHub Webserver Guide
 
-This guide is for the Raspberry Pi webserver in `pi-webserver.py`.
+This guide is for the Raspberry Pi webserver in
+`answer_server/webserver/pi-webserver.py`.
 
 Use this option when you want a small always-on server on your network. The Pi
 fetches the latest files from GitHub each time Proxmox asks for them.
+
+Command examples in this guide are indented so they are safe to copy from either
+the rendered page or the raw file. Copy the indented command lines only; labels
+such as `Bash:` and `PowerShell:` are not commands.
 
 ## What This Does
 
 The Pi webserver:
 
 - runs on port `8080`
-- serves `/answer` from GitHub file `answer.toml`
-- serves `/firstboot` from GitHub file `firstboot.sh`
+- serves `/nodes` from GitHub file `vars/pve_node.txt`
+- serves `/answer` from GitHub file `vars/<node>.toml`, selected by MAC address
+- serves `/firstboot` from GitHub file `answer_server/firstboot.sh`
 - supports the `POST` request Proxmox sends during unattended install
 - can run automatically on boot with `systemd`
 
@@ -20,12 +26,12 @@ install.
 
 ## Important Note About Secrets
 
-This server fetches `answer.toml` from the public GitHub raw URL configured in
+This server fetches public files from GitHub raw URLs configured in
 `pi-webserver.py`.
 
 That means this option is best for a lab network or a public-safe answer file.
-If your real `answer.toml` contains sensitive values, use the Cloudflare Worker
-secret setup instead.
+If your real answer files contain sensitive values, do not use this public
+GitHub setup.
 
 ## Prerequisites
 
@@ -39,9 +45,8 @@ You need:
 
 The examples below use this Pi IP address:
 
-```text
-192.168.1.253
-```
+    192.168.1.253
+
 
 Replace it with your Pi's real IP address.
 
@@ -49,19 +54,17 @@ Replace it with your Pi's real IP address.
 
 SSH into the Pi, then run:
 
-```bash
-mkdir -p ~/proxmox-server
-cd ~/proxmox-server
+    mkdir -p ~/proxmox-server
+    cd ~/proxmox-server
+    
+    wget https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/answer_server/webserver/pi-webserver.py
+    chmod +x pi-webserver.py
 
-wget https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/pi-webserver.py
-chmod +x pi-webserver.py
-```
 
 Start it manually for a quick test:
 
-```bash
-python3 ./pi-webserver.py
-```
+    python3 ./pi-webserver.py
+
 
 You should see the server start on port `8080`.
 
@@ -69,16 +72,17 @@ You should see the server start on port `8080`.
 
 From another machine on the same network:
 
-```bash
-curl http://192.168.1.253:8080/answer
-curl http://192.168.1.253:8080/firstboot
+    curl http://192.168.1.253:8080/nodes
+    curl "http://192.168.1.253:8080/answer?node=pve-temp"
+    curl http://192.168.1.253:8080/firstboot
+    
+    curl -X POST http://192.168.1.253:8080/answer \
+      -H 'content-type: application/json' \
+      --data '{"network_interfaces":[{"link":"eno1","mac":"10:62:E5:00:17:8D"}]}'
 
-curl -X POST http://192.168.1.253:8080/answer \
-  -H 'content-type: application/json' \
-  --data '{"product":"pve","hostname":"test-node"}'
-```
 
-You should see the contents of `answer.toml` and `firstboot.sh` from GitHub.
+You should see the node map, the selected answer file, and `firstboot.sh` from
+GitHub.
 
 Stop the manual server with `Ctrl+C` before setting up the service.
 
@@ -86,53 +90,46 @@ Stop the manual server with `Ctrl+C` before setting up the service.
 
 Download the service file:
 
-```bash
-cd ~/proxmox-server
-wget https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/proxmox-webserver.service
-```
+    cd ~/proxmox-server
+    wget https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/proxmox-webserver.service
+
 
 Check the service file before installing it:
 
-```bash
-nano proxmox-webserver.service
-```
+    nano proxmox-webserver.service
+
 
 Make sure these lines match your Pi user and folder:
 
-```text
-User=buddy
-WorkingDirectory=/home/buddy/proxmox-server
-ExecStart=/usr/bin/python3 /home/buddy/proxmox-server/pi-webserver.py
-```
+    User=buddy
+    WorkingDirectory=/home/buddy/proxmox-server
+    ExecStart=/usr/bin/python3 /home/buddy/proxmox-server/pi-webserver.py
+
 
 For the normal Raspberry Pi OS user, these lines may need to be:
 
-```text
-User=pi
-WorkingDirectory=/home/pi/proxmox-server
-ExecStart=/usr/bin/python3 /home/pi/proxmox-server/pi-webserver.py
-```
+    User=pi
+    WorkingDirectory=/home/pi/proxmox-server
+    ExecStart=/usr/bin/python3 /home/pi/proxmox-server/pi-webserver.py
+
 
 Install and start the service:
 
-```bash
-sudo cp proxmox-webserver.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable proxmox-webserver.service
-sudo systemctl start proxmox-webserver.service
-```
+    sudo cp proxmox-webserver.service /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl enable proxmox-webserver.service
+    sudo systemctl start proxmox-webserver.service
+
 
 Check that it is running:
 
-```bash
-sudo systemctl status proxmox-webserver.service
-```
+    sudo systemctl status proxmox-webserver.service
+
 
 View live logs:
 
-```bash
-sudo journalctl -u proxmox-webserver.service -f
-```
+    sudo journalctl -u proxmox-webserver.service -f
+
 
 ## Prepare the Proxmox ISO
 
@@ -140,19 +137,17 @@ Use the Pi's `/answer` URL.
 
 PowerShell:
 
-```powershell
-proxmox-auto-install-assistant prepare-iso .\ `
-  --fetch-from http `
-  --url "http://192.168.1.253:8080/answer"
-```
+    proxmox-auto-install-assistant prepare-iso .\ `
+      --fetch-from http `
+      --url "http://192.168.1.253:8080/answer"
+
 
 Bash:
 
-```bash
-proxmox-auto-install-assistant prepare-iso ./ \
-  --fetch-from http \
-  --url "http://192.168.1.253:8080/answer"
-```
+    proxmox-auto-install-assistant prepare-iso ./ \
+      --fetch-from http \
+      --url "http://192.168.1.253:8080/answer"
+
 
 Replace `192.168.1.253` with your Pi's IP address.
 
@@ -160,27 +155,24 @@ Replace `192.168.1.253` with your Pi's IP address.
 
 If your answer file references the Pi-hosted first boot script, use:
 
-```text
-http://192.168.1.253:8080/firstboot
-```
+    http://192.168.1.253:8080/firstboot
+
 
 ## Useful Service Commands
 
-```bash
-sudo systemctl start proxmox-webserver.service
-sudo systemctl stop proxmox-webserver.service
-sudo systemctl restart proxmox-webserver.service
-sudo systemctl status proxmox-webserver.service
-sudo journalctl -u proxmox-webserver.service -n 50
-```
+    sudo systemctl start proxmox-webserver.service
+    sudo systemctl stop proxmox-webserver.service
+    sudo systemctl restart proxmox-webserver.service
+    sudo systemctl status proxmox-webserver.service
+    sudo journalctl -u proxmox-webserver.service -n 50
+
 
 ## Common Problems
 
 If the service will not start:
 
-```bash
-sudo journalctl -u proxmox-webserver.service -n 50
-```
+    sudo journalctl -u proxmox-webserver.service -n 50
+
 
 Check that the `User`, `WorkingDirectory`, and `ExecStart` lines match the actual
 Pi username and folder.
@@ -194,10 +186,10 @@ If other machines cannot connect:
 
 If GitHub fetches fail:
 
-```bash
-curl -I https://github.com
-curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/answer.toml
-```
+    curl -I https://github.com
+    curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve_node.txt
+    curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve-temp.toml
+
 
 If GitHub shows the wrong file contents:
 

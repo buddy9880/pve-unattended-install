@@ -1,0 +1,20 @@
+Everything should be able to be triggered from a phone, meaning one script controls everything.  Ansible can be used to set up
+everything but all functions probably need to be script based.
+
+prepare media
+    find and download latest proxmox image
+    create media with proxmox-automated-install-assistant, need to point it at a url
+    transfer media to pxe server and create the two boot files?
+
+serve answers
+    answer files provided by cloudflare worker or local webserver
+    server reads MAC address of node requesting answer file and serves correct one
+    answer files can probably be hosted on github, will need script to update them if not
+    
+
+pxe server
+    arms or disarms based on existence of file
+    filters based on MAC, when a pve node boots to pxe when armed serves recovery iso, all other MAC get rebooted
+
+amt worflow
+    able to force nodes to reboot to pxe

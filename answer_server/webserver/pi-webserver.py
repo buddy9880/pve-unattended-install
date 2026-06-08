@@ -12,20 +12,20 @@ Configuration:
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.request import urlopen
 from urllib.error import URLError, HTTPError
+from urllib.parse import parse_qs, urlparse
 from datetime import datetime
+import json
+import re
 import sys
+from typing import Optional
 
 # Configuration
 PORT = 8080
 GITHUB_REPO = "buddy9880/pve-unattended-install"
 GITHUB_BRANCH = "main"
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}"
-
-# File mappings: endpoint -> GitHub filename
-FILE_MAP = {
-    "/answer": "answer.toml",
-    "/firstboot": "firstboot.sh"
-}
+NODE_MAP_FILE = "vars/pve_node.txt"
+FIRSTBOOT_FILE = "answer_server/firstboot.sh"
 
 def fetch_from_github(filename: str) -> bytes:
     """
@@ -39,6 +39,51 @@ def fetch_from_github(filename: str) -> bytes:
         data = response.read()
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Successfully fetched {len(data)} bytes")
         return data
+
+def normalize_mac(mac: str) -> str:
+    return mac.lower() if isinstance(mac, str) else ""
+
+def parse_node_map(text: str) -> dict[str, str]:
+    nodes = {}
+    current_node = None
+
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or line == "nodes:":
+            continue
+
+        node_match = re.match(r"^([A-Za-z0-9_-]+):$", line)
+        if node_match:
+            current_node = node_match.group(1)
+            continue
+
+        mac_match = re.match(r"^mac_address:\s*[\"']?([^\"']+)[\"']?$", line)
+        if mac_match and current_node:
+            mac = normalize_mac(mac_match.group(1).strip())
+            if mac:
+                nodes[mac] = current_node
+
+    return nodes
+
+def select_node_from_post(body: bytes) -> Optional[str]:
+    try:
+        system_info = json.loads(body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return None
+
+    interfaces = system_info.get("network_interfaces")
+    if not isinstance(interfaces, list):
+        return None
+
+    node_map = parse_node_map(fetch_from_github(NODE_MAP_FILE).decode("utf-8"))
+    for iface in interfaces:
+        if not isinstance(iface, dict):
+            continue
+        node_name = node_map.get(normalize_mac(iface.get("mac")))
+        if node_name:
+            return node_name
+
+    return None
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -54,21 +99,34 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _handle_request(self):
+    def _handle_request(self, body: bytes = b""):
         """Handle both GET and POST requests"""
-        # Normalize path (remove trailing slash)
-        path = self.path.rstrip('/')
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path.rstrip('/')
         if not path:
             path = "/answer"  # Default to answer file for root requests
-        
-        # Check if this is a known endpoint
-        if path not in FILE_MAP:
-            self.send_error(404, f"Endpoint '{path}' not found. Available: {', '.join(FILE_MAP.keys())}")
+
+        if path == "/nodes":
+            github_filename = NODE_MAP_FILE
+        elif path == "/firstboot":
+            github_filename = FIRSTBOOT_FILE
+        elif path == "/answer":
+            if self.command == "GET":
+                node_name = parse_qs(parsed_url.query).get("node", [""])[0]
+                if not re.match(r"^[A-Za-z0-9_-]+$", node_name):
+                    self.send_error(400, "Use /answer?node=pve-temp for GET testing")
+                    return
+            else:
+                node_name = select_node_from_post(body)
+                if not node_name:
+                    self.send_error(404, "No answer file configured for this machine")
+                    return
+
+            github_filename = f"vars/{node_name}.toml"
+        else:
+            self.send_error(404, "Endpoint not found. Available: /nodes, /answer, /firstboot")
             return
-        
-        # Get the GitHub filename for this endpoint
-        github_filename = FILE_MAP[path]
-        
+
         try:
             # Fetch file from GitHub
             data = fetch_from_github(github_filename)
@@ -102,11 +160,10 @@ class Handler(BaseHTTPRequestHandler):
         """Handle POST requests (Proxmox uses POST for answer file)"""
         # Read and discard the POST body (Proxmox sends system info)
         content_length = int(self.headers.get("Content-Length", "0"))
-        if content_length > 0:
-            _ = self.rfile.read(content_length)
+        body = self.rfile.read(content_length) if content_length > 0 else b""
         
         # Handle the request
-        self._handle_request()
+        self._handle_request(body)
 
 def main():
     """Main entry point"""
@@ -122,9 +179,10 @@ def main():
         print(f"Branch:       {GITHUB_BRANCH}")
         print()
         print("Endpoints:")
-        print(f"  POST /answer    → Fetches answer.toml from GitHub")
-        print(f"  GET  /answer    → Fetches answer.toml from GitHub")
-        print(f"  GET  /firstboot → Fetches firstboot.sh from GitHub")
+        print(f"  GET  /nodes               → Fetches {NODE_MAP_FILE} from GitHub")
+        print(f"  POST /answer              → Selects vars/<node>.toml by MAC address")
+        print(f"  GET  /answer?node=pve-temp → Fetches one answer file for testing")
+        print(f"  GET  /firstboot           → Fetches {FIRSTBOOT_FILE} from GitHub")
         print()
         print("Note: Files are fetched from GitHub on EVERY request (no caching)")
         print("=" * 70)

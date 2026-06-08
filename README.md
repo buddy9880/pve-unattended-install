@@ -11,10 +11,13 @@ the answer file.
 
 The current recommended setup is the Cloudflare Worker:
 
-- `answer.toml` stays off GitHub
-- Cloudflare stores the real answer file as a secret named `ANSWER_TOML`
-- Cloudflare stores a URL token as a secret named `ANSWER_TOKEN`
-- Proxmox downloads it from the Worker at `/answer?token=<your-answer-token>`
+- each node has its own answer file, such as `vars/pve-temp.toml` and
+  `vars/pve-main.toml`
+- `vars/pve_node.txt` maps node MAC addresses to node names
+- the Worker fetches those public files from GitHub raw URLs
+- Proxmox downloads its answer file from the Worker at `/answer`
+- the Worker chooses the right answer file from the machine information Proxmox
+  sends in the `POST` body
 - the default `workers.dev` URL and preview URLs are disabled, so the intended
   production URL is the custom domain `https://pve-answer.bdev.uk`
 
@@ -24,38 +27,54 @@ There are also two local network options:
   laptop, desktop, or temporary machine on the same network
 - [Raspberry Pi GitHub webserver](docs/PI-GITHUB-WEBSERVER.md) - run
   `pi-webserver.py` on a small always-on Pi that fetches files from GitHub
+- [PXE recovery boot](docs/PXE-RECOVERY.md) - boot the prepared installer over
+  the network instead of using a physical USB drive
 
-You can still use GitHub raw URLs for public files such as `firstboot.sh`. Keep
-private values in `answer.toml` out of Git unless you intentionally choose one
-of the public-file webserver options.
+This GitHub-backed setup only makes sense if the answer files are public-safe.
+Hostnames and private LAN IPs are usually low risk, but the current answer files
+also include `root-password-hashed`. A password hash is not the plain password,
+but it should still be treated as sensitive because someone can copy it and try
+to crack it offline.
 
 ## Normal Cloudflare Workflow
 
 When coming back to this later, the usual order is:
 
 1. Install or activate Node.js 22.
-2. Run `npm install`.
-3. Put your real answer file in local `answer.toml`.
-4. Create or reuse local `answer-token.txt`.
-5. Upload `ANSWER_TOML` and `ANSWER_TOKEN` to Cloudflare.
-6. Run `npm run deploy`.
-7. Test `https://pve-answer.bdev.uk/answer?token=<your-answer-token>`.
+2. Update `vars/pve_node.txt` if a node MAC address changes.
+3. Update the local node answer files, such as `vars/pve-temp.toml` and
+   `vars/pve-main.toml`.
+4. Commit and push the `vars/` changes to GitHub.
+5. Run `npm install` from `answer_server/cloudflare_worker/` if dependencies are
+   missing.
+6. Run `npm run deploy` from `answer_server/cloudflare_worker/`.
+7. Test `https://pve-answer.bdev.uk/answer`.
 8. Download the Proxmox ISO and run `proxmox-auto-install-assistant prepare-iso`.
+
+## Copy/Paste Note
+
+Command examples in this README are indented instead of wrapped in Markdown
+code fences. That keeps the commands safe to copy from either the rendered
+README or the raw file. Copy the indented command lines only; labels such as
+`Bash:` and `PowerShell:` are just labels.
 
 ## What Is Included
 
-- `src/worker.js` - the Cloudflare Worker
-- `wrangler.jsonc` - Cloudflare Worker settings
-- `package.json` - install and deploy commands
-- `example_answer.toml` - safe example answer file
-- `firstboot.sh` - optional first boot script
-- `webserver.py` - simple local network webserver
-- `pi-webserver.py` - Raspberry Pi webserver that fetches files from GitHub
+- `answer_server/cloudflare_worker/src/worker.js` - the Cloudflare Worker
+- `answer_server/cloudflare_worker/wrangler.jsonc` - Worker settings
+- `answer_server/cloudflare_worker/package.json` - install and deploy commands
+- `vars/pve_node.txt` - node name, MAC address, and IP address map
+- `vars/pve-temp.toml` - answer file for `pve-temp`
+- `vars/pve-main.toml` - answer file for `pve-main`
+- `vars/example_answer.toml` - safe example answer file
+- `answer_server/firstboot.sh` - optional first boot script
+- `answer_server/webserver/webserver.py` - simple local network webserver
+- `answer_server/webserver/pi-webserver.py` - Raspberry Pi webserver that fetches
+  files from GitHub
 - `docs/` - setup guides for the non-Cloudflare options
 
 Do not commit these local secret files:
 
-- `answer.toml`
 - `answer-token.txt`
 - `.dev.vars`
 - `.env`
@@ -67,17 +86,16 @@ They are ignored by Git.
 The Worker has these paths:
 
 - `GET /health` checks that the Worker is running
-- `POST /answer?token=<your-answer-token>` returns the answer file
+- `GET /nodes` returns the GitHub node map the Worker is using
+- `POST /answer` returns the answer file for the requesting machine
 
 Everything else returns an error. `/answer` must be a `POST` request because that
-is how the Proxmox auto install flow fetches the answer file. Requests without
-the correct token return `401`.
+is how the Proxmox auto install flow fetches the answer file.
 
 The examples below use:
 
-```text
-https://pve-answer.bdev.uk
-```
+    https://pve-answer.bdev.uk
+
 
 If you use a different custom domain, replace `pve-answer.bdev.uk` in the
 commands.
@@ -99,54 +117,51 @@ Wrangler needs a recent Node.js version. This repo uses Node.js 22.
 
 On Linux, macOS, or WSL, the easiest option is `nvm`:
 
-```bash
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-source ~/.nvm/nvm.sh
-nvm install 22
-nvm use 22
-node --version
-npm --version
-```
+    curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+    source ~/.nvm/nvm.sh
+    nvm install 22
+    nvm use 22
+    node --version
+    npm --version
+
 
 If you already have `nvm` installed, you only need:
 
-```bash
-source ~/.nvm/nvm.sh
-nvm install 22
-nvm use 22
-```
+    source ~/.nvm/nvm.sh
+    nvm install 22
+    nvm use 22
+
 
 On Windows PowerShell, use one of these options:
 
 - install Node.js 22 from the Node.js website
 - install `nvm-windows`, then run:
 
-```powershell
-nvm install 22
-nvm use 22
-node --version
-npm --version
-```
+    nvm install 22
+    nvm use 22
+    node --version
+    npm --version
+
 
 ## Install and Login
 
-Run these commands from the repo folder.
+Run these commands from the Worker folder.
 
 PowerShell:
 
-```powershell
-npm install
-npx wrangler login
-```
+    cd .\answer_server\cloudflare_worker
+    npm install
+    npx wrangler login
+
 
 Bash:
 
-```bash
-source ~/.nvm/nvm.sh
-nvm use 22
-npm install
-npx wrangler login
-```
+    cd /home/buddy/proxmox-recovery-kit/answer_server/cloudflare_worker
+    source ~/.nvm/nvm.sh
+    nvm use 22
+    npm install
+    npx wrangler login
+
 
 `npx wrangler login` opens a browser so you can connect this project to your
 Cloudflare account.
@@ -156,118 +171,88 @@ terminal before running `npm` or `npx wrangler` commands.
 
 ## Test Locally
 
-For local testing, create a `.dev.vars` file. This gives Wrangler a local copy
-of the answer file without putting secrets in Git.
-
-To test with the safe example file:
-
-PowerShell:
-
-```powershell
-$answer = Get-Content .\example_answer.toml -Raw
-@(
-  "ANSWER_TOML=$($answer | ConvertTo-Json -Compress)"
-  "ANSWER_TOKEN=local-test-token"
-) | Set-Content .dev.vars
-```
-
-Bash:
-
-```bash
-node -e "const fs = require('fs'); console.log('ANSWER_TOML=' + JSON.stringify(fs.readFileSync('example_answer.toml', 'utf8')) + '\nANSWER_TOKEN=local-test-token')" > .dev.vars
-```
-
-To test with your real local `answer.toml`, replace `example_answer.toml` with
-`answer.toml` in the commands above.
+The local Worker fetches files from the GitHub raw URL configured in
+`answer_server/cloudflare_worker/wrangler.jsonc`. Push `vars/pve_node.txt` and
+the `vars/*.toml` files before testing if you want the deployed GitHub copy to
+match your local copy.
 
 Start the local Worker:
 
 PowerShell:
 
-```powershell
-npm run dev
-```
+    cd .\answer_server\cloudflare_worker
+    npm run dev
+
 
 Bash:
 
-```bash
-npm run dev
-```
+    cd /home/buddy/proxmox-recovery-kit/answer_server/cloudflare_worker
+    npm run dev
+
 
 Open a second terminal and test it.
 
 PowerShell:
 
-```powershell
-Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8787/health"
+    Invoke-RestMethod -Method Get -Uri "http://127.0.0.1:8787/health"
+    
+    $body = @{ network_interfaces = @(@{ link = "eno1"; mac = "10:62:E5:00:17:8D" }) } | ConvertTo-Json -Depth 4
+    Invoke-RestMethod `
+      -Method Post `
+      -Uri "http://127.0.0.1:8787/answer" `
+      -ContentType "application/json" `
+      -Body $body
 
-$body = @{ product = "pve"; hostname = "test-node" } | ConvertTo-Json
-Invoke-RestMethod `
-  -Method Post `
-  -Uri "http://127.0.0.1:8787/answer?token=local-test-token" `
-  -ContentType "application/json" `
-  -Body $body
-```
 
 Bash:
 
-```bash
-curl http://127.0.0.1:8787/health
+    curl http://127.0.0.1:8787/health
+    curl http://127.0.0.1:8787/nodes
+    
+    curl -X POST "http://127.0.0.1:8787/answer" \
+      -H 'content-type: application/json' \
+      --data '{"network_interfaces":[{"link":"eno1","mac":"10:62:E5:00:17:8D"}]}'
 
-curl -X POST "http://127.0.0.1:8787/answer?token=local-test-token" \
-  -H 'content-type: application/json' \
-  --data '{"product":"pve","hostname":"test-node"}'
-```
 
 You should see `ok` from `/health`, and TOML text from `/answer`.
 
-To confirm the token check works, try the same `POST /answer` request without
-`?token=local-test-token`. Expected result: status `401`.
+To confirm `/answer` still rejects normal browser-style `GET` requests:
 
-## Add the Cloudflare Secrets
+    curl -i "http://127.0.0.1:8787/answer"
 
-Before deploying, store your real `answer.toml` in Cloudflare as a secret named
-`ANSWER_TOML`. Then create a local `answer-token.txt` file and store that token
-in Cloudflare as `ANSWER_TOKEN`.
+
+Expected result: status `405`.
+
+## Update Answer Files
+
+Edit the local answer file for the node you want to change:
+
+- `vars/pve-temp.toml` for `pve-temp`
+- `vars/pve-main.toml` for `pve-main`
+
+If a machine's MAC address changes, update `vars/pve_node.txt` too.
+
+After changing files under `vars/`, commit and push them to GitHub. The Worker
+fetches from GitHub on request, so answer-file-only changes do not require a
+Worker deploy.
+
+## Check GitHub Raw Files
+
+Before deploying or preparing an ISO, confirm GitHub is serving the files the
+Worker will fetch.
 
 PowerShell:
 
-```powershell
-Get-Content .\answer.toml -Raw | npx wrangler secret put ANSWER_TOML
+    Invoke-RestMethod -Uri "https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve_node.txt"
+    Invoke-RestMethod -Uri "https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve-temp.toml"
+    Invoke-RestMethod -Uri "https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve-main.toml"
 
-if (-not (Test-Path .\answer-token.txt) -or -not (Get-Content .\answer-token.txt -Raw).Trim()) {
-  $answerToken = [guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N")
-  Set-Content -NoNewline .\answer-token.txt $answerToken
-}
-
-(Get-Content .\answer-token.txt -Raw).Trim() | npx wrangler secret put ANSWER_TOKEN
-```
 
 Bash:
 
-```bash
-source ~/.nvm/nvm.sh
-nvm use 22
-npx wrangler secret put ANSWER_TOML < answer.toml
-
-answer_token="$(tr -d '\r\n' < answer-token.txt 2>/dev/null || true)"
-test -n "$answer_token" || answer_token="$(openssl rand -hex 32)"
-printf '%s' "$answer_token" > answer-token.txt
-tr -d '\r\n' < answer-token.txt | npx wrangler secret put ANSWER_TOKEN
-```
-
-If your shell does not pass the file content correctly, run this instead:
-
-```bash
-npx wrangler secret put ANSWER_TOML
-npx wrangler secret put ANSWER_TOKEN
-```
-
-Then paste the contents of `answer.toml` for `ANSWER_TOML`, and paste the
-contents of `answer-token.txt` for `ANSWER_TOKEN`.
-
-Keep `answer-token.txt` private. You need that value in the Proxmox `--url`
-value.
+    curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve_node.txt
+    curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve-temp.toml
+    curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve-main.toml
 
 ## Deploy
 
@@ -275,104 +260,102 @@ Deploy the Worker to Cloudflare:
 
 PowerShell:
 
-```powershell
-npm run deploy
-```
+    cd .\answer_server\cloudflare_worker
+    npm run deploy
+
 
 Bash:
 
-```bash
-npm run deploy
-```
+    cd /home/buddy/proxmox-recovery-kit/answer_server/cloudflare_worker
+    npm run deploy
+
 
 This repo disables the default `workers.dev` URL and Cloudflare Preview URLs in
 `wrangler.jsonc`. After deployment, use the custom domain:
 
-```text
-https://pve-answer.bdev.uk
-```
+    https://pve-answer.bdev.uk
+
 
 If you create a different custom domain in Cloudflare, use that domain instead.
 
 ## Test the Deployed Worker
 
-These commands confirm the deployed Worker is reachable and that the token check
-is working.
+These commands confirm the deployed Worker is reachable and can select both node
+answer files from MAC addresses.
 
 PowerShell:
 
-```powershell
-$workerUrl = "https://pve-answer.bdev.uk"
-$answerToken = (Get-Content .\answer-token.txt -Raw).Trim()
+    $workerUrl = "https://pve-answer.bdev.uk"
+    
+    Invoke-RestMethod -Method Get -Uri "$workerUrl/health"
+    Invoke-RestMethod -Method Get -Uri "$workerUrl/nodes"
+    
+    $body = @{ network_interfaces = @(@{ link = "eno1"; mac = "10:62:E5:00:17:8D" }) } | ConvertTo-Json -Depth 4
+    Invoke-RestMethod `
+      -Method Post `
+      -Uri "$workerUrl/answer" `
+      -ContentType "application/json" `
+      -Body $body
 
-Invoke-RestMethod -Method Get -Uri "$workerUrl/health"
-
-$body = @{ product = "pve"; hostname = "test-node" } | ConvertTo-Json
-Invoke-RestMethod `
-  -Method Post `
-  -Uri "$workerUrl/answer?token=$answerToken" `
-  -ContentType "application/json" `
-  -Body $body
-```
 
 Bash:
 
-```bash
-worker_url="https://pve-answer.bdev.uk"
-answer_token="$(tr -d '\r\n' < answer-token.txt)"
+    worker_url="https://pve-answer.bdev.uk"
+    
+    curl "$worker_url/health"
+    curl "$worker_url/nodes"
+    
+    curl -X POST "$worker_url/answer" \
+      -H 'content-type: application/json' \
+      --data '{"network_interfaces":[{"link":"eno1","mac":"10:62:E5:00:17:8D"}]}'
 
-curl "$worker_url/health"
+    curl -X POST "$worker_url/answer" \
+      -H 'content-type: application/json' \
+      --data '{"network_interfaces":[{"link":"enp0s31f6","mac":"90:8D:6E:8C:45:CF"}]}'
 
-curl -X POST "$worker_url/answer?token=$answer_token" \
-  -H 'content-type: application/json' \
-  --data '{"product":"pve","hostname":"test-node"}'
-```
 
 To confirm `/answer` rejects normal browser-style `GET` requests:
 
 PowerShell:
 
-```powershell
-try {
-  Invoke-RestMethod -Method Get -Uri "$workerUrl/answer"
-} catch {
-  $_.Exception.Response.StatusCode.value__
-}
-```
+    try {
+      Invoke-RestMethod -Method Get -Uri "$workerUrl/answer"
+    } catch {
+      $_.Exception.Response.StatusCode.value__
+    }
+
 
 Bash:
 
-```bash
-curl -i "$worker_url/answer"
-```
+    curl -i "$worker_url/answer"
+
 
 Expected result: status `405`.
 
-To confirm the token check works:
+To confirm unknown machines are refused:
 
 PowerShell:
 
-```powershell
-try {
-  Invoke-RestMethod `
-    -Method Post `
-    -Uri "$workerUrl/answer" `
-    -ContentType "application/json" `
-    -Body $body
-} catch {
-  $_.Exception.Response.StatusCode.value__
-}
-```
+    $unknownBody = @{ network_interfaces = @(@{ link = "eno1"; mac = "00:11:22:33:44:55" }) } | ConvertTo-Json -Depth 4
+    try {
+      Invoke-RestMethod `
+        -Method Post `
+        -Uri "$workerUrl/answer" `
+        -ContentType "application/json" `
+        -Body $unknownBody
+    } catch {
+      $_.Exception.Response.StatusCode.value__
+    }
+
 
 Bash:
 
-```bash
-curl -i -X POST "$worker_url/answer" \
-  -H 'content-type: application/json' \
-  --data '{"product":"pve","hostname":"test-node"}'
-```
+    curl -i -X POST "$worker_url/answer" \
+      -H 'content-type: application/json' \
+      --data '{"network_interfaces":[{"link":"eno1","mac":"00:11:22:33:44:55"}]}'
 
-Expected result: status `401`.
+
+Expected result: status `404`.
 
 ## Use It When Preparing the Proxmox ISO
 
@@ -380,42 +363,37 @@ Download the Proxmox VE ISO first.
 
 Bash:
 
-```bash
-wget https://enterprise.proxmox.com/iso/proxmox-ve_9.2-1.iso
-```
+    wget https://enterprise.proxmox.com/iso/proxmox-ve_9.2-1.iso
+
 
 PowerShell:
 
-```powershell
-Invoke-WebRequest `
-  -Uri "https://enterprise.proxmox.com/iso/proxmox-ve_9.2-1.iso" `
-  -OutFile ".\proxmox-ve_9.2-1.iso"
-```
+    Invoke-WebRequest `
+      -Uri "https://enterprise.proxmox.com/iso/proxmox-ve_9.2-1.iso" `
+      -OutFile ".\proxmox-ve_9.2-1.iso"
+
 
 Then use the deployed `/answer` URL with `proxmox-auto-install-assistant`.
 
 PowerShell:
 
-```powershell
-proxmox-auto-install-assistant prepare-iso .\proxmox-ve_9.2-1.iso `
-  --fetch-from http `
-  --url "https://pve-answer.bdev.uk/answer?token=<your-answer-token>"
-```
+    proxmox-auto-install-assistant prepare-iso .\proxmox-ve_9.2-1.iso `
+      --fetch-from http `
+      --url "https://pve-answer.bdev.uk/answer"
+
 
 Bash:
 
-```bash
-proxmox-auto-install-assistant prepare-iso ./proxmox-ve_9.2-1.iso \
-  --fetch-from http \
-  --url "https://pve-answer.bdev.uk/answer?token=<your-answer-token>"
-```
+    proxmox-auto-install-assistant prepare-iso ./proxmox-ve_9.2-1.iso \
+      --fetch-from http \
+      --url "https://pve-answer.bdev.uk/answer"
+
 
 If your answer file references `firstboot.sh`, you can keep using the public
 GitHub raw URL:
 
-```text
-https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/firstboot.sh
-```
+    https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/answer_server/firstboot.sh
+
 
 ## Custom Domain and Default URLs
 
@@ -437,16 +415,13 @@ Use the custom URL when preparing the ISO:
 
 PowerShell:
 
-```powershell
-proxmox-auto-install-assistant prepare-iso .\proxmox-ve_9.2-1.iso `
-  --fetch-from http `
-  --url "https://pve-answer.bdev.uk/answer?token=<your-answer-token>"
-```
+    proxmox-auto-install-assistant prepare-iso .\proxmox-ve_9.2-1.iso `
+      --fetch-from http `
+      --url "https://pve-answer.bdev.uk/answer"
+
 
 Bash:
 
-```bash
-proxmox-auto-install-assistant prepare-iso ./proxmox-ve_9.2-1.iso \
-  --fetch-from http \
-  --url "https://pve-answer.bdev.uk/answer?token=<your-answer-token>"
-```
+    proxmox-auto-install-assistant prepare-iso ./proxmox-ve_9.2-1.iso \
+      --fetch-from http \
+      --url "https://pve-answer.bdev.uk/answer"

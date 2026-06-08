@@ -18,7 +18,7 @@ mkdir -p ~/proxmox-server
 cd ~/proxmox-server
 
 # 2. Download the webserver script
-wget https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/pi-webserver.py
+wget https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/answer_server/webserver/pi-webserver.py
 
 # 3. Make it executable
 chmod +x pi-webserver.py
@@ -37,9 +37,10 @@ GitHub Repo:  buddy9880/pve-unattended-install
 Branch:       main
 
 Endpoints:
-  POST /answer    → Fetches answer.toml from GitHub
-  GET  /answer    → Fetches answer.toml from GitHub
-  GET  /firstboot → Fetches firstboot.sh from GitHub
+  GET  /nodes               → Fetches vars/pve_node.txt from GitHub
+  POST /answer              → Selects vars/<node>.toml by MAC address
+  GET  /answer?node=pve-temp → Fetches one answer file for testing
+  GET  /firstboot           → Fetches answer_server/firstboot.sh from GitHub
 
 Note: Files are fetched from GitHub on EVERY request (no caching)
 ======================================================================
@@ -51,13 +52,16 @@ From your laptop or another machine on the network:
 
 ```bash
 # Test answer file endpoint
-curl http://192.168.1.253:8080/answer
+curl http://192.168.1.253:8080/nodes
+curl "http://192.168.1.253:8080/answer?node=pve-temp"
 
 # Test firstboot script endpoint
 curl http://192.168.1.253:8080/firstboot
 
 # Test POST request (what Proxmox uses)
-curl -X POST http://192.168.1.253:8080/answer
+curl -X POST http://192.168.1.253:8080/answer \
+  -H 'content-type: application/json' \
+  --data '{"network_interfaces":[{"link":"eno1","mac":"10:62:E5:00:17:8D"}]}'
 ```
 
 If you see the file contents, it's working!
@@ -179,8 +183,9 @@ Note: The URL ends in `/answer` (not `/` or `/answer.toml`)
 
 1. **Proxmox boots** from the prepared ISO
 2. **Sends POST request** to `http://192.168.1.253:8080/answer`
-3. **Pi webserver receives request** and fetches latest `answer.toml` from GitHub
-4. **Pi serves answer file** to Proxmox
+3. **Pi webserver receives request** and matches the node MAC address from
+   `vars/pve_node.txt`
+4. **Pi fetches `vars/<node>.toml` from GitHub** and serves it to Proxmox
 5. **Proxmox reads config** and sees firstboot URL: `http://192.168.1.253:8080/firstboot`
 6. **Proxmox requests firstboot script** via GET request
 7. **Pi fetches and serves** `firstboot.sh` from GitHub
@@ -224,7 +229,8 @@ curl http://localhost:8080/answer
 curl -I https://github.com
 
 # Test raw GitHub URL directly
-curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/answer.toml
+curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve_node.txt
+curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve-temp.toml
 
 # Check DNS resolution
 nslookup raw.githubusercontent.com
@@ -240,7 +246,7 @@ The webserver fetches files on **every request** (no caching). If you push chang
 
 If files still aren't updating:
 - Verify changes are pushed to GitHub: https://github.com/buddy9880/pve-unattended-install
-- Check GitHub is returning the updated file: `curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/answer.toml`
+- Check GitHub is returning the updated file: `curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve-temp.toml`
 - Clear your browser cache if testing in a browser
 
 ## Updating the Webserver
@@ -254,7 +260,7 @@ cd ~/proxmox-server
 cp pi-webserver.py pi-webserver.py.backup
 
 # Download latest version
-wget -O pi-webserver.py https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/pi-webserver.py
+wget -O pi-webserver.py https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/answer_server/webserver/pi-webserver.py
 
 # Restart the service
 sudo systemctl restart proxmox-webserver.service
@@ -302,15 +308,16 @@ curl http://localhost:8080/answer
 curl http://localhost:8080/firstboot
 
 # Check what files are on GitHub
-curl -I https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/answer.toml
-curl -I https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/firstboot.sh
+curl -I https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve_node.txt
+curl -I https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve-temp.toml
+curl -I https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/answer_server/firstboot.sh
 ```
 
 ## Support
 
 If you encounter issues:
 1. Check service logs: `sudo journalctl -u proxmox-webserver.service -n 100`
-2. Test GitHub connectivity: `curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/answer.toml`
+2. Test GitHub connectivity: `curl https://raw.githubusercontent.com/buddy9880/pve-unattended-install/main/vars/pve_node.txt`
 3. Test local connectivity: `curl http://localhost:8080/answer`
 4. Test remote connectivity: `curl http://192.168.1.253:8080/answer` (from another machine)
 5. Verify static IP: `ip addr show`

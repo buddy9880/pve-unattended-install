@@ -1,0 +1,704 @@
+Raspberry Pi PXE recovery implementation notes
+==============================================
+
+Purpose
+-------
+
+This file records the exact Raspberry Pi PXE recovery setup that was built
+manually. It is intended as source material for a future Ansible playbook.
+
+Do not treat this as a playbook. It is only an implementation record.
+
+
+Network context
+---------------
+
+Pi hostname:
+
+  backupvpn
+
+Pi SSH user:
+
+  buddy
+
+Pi Ethernet recovery address:
+
+  192.168.1.253/24 on eth0
+
+LAN subnet:
+
+  192.168.1.0/24
+
+Gateway/router:
+
+  192.168.1.254
+
+Router:
+
+  AT&T BGW210
+
+Router role:
+
+  The BGW210 remains the normal DHCP server. It does not provide PXE DHCP
+  options. The Pi uses dnsmasq ProxyDHCP to provide only PXE boot metadata.
+
+Pi interfaces observed:
+
+  lo          127.0.0.1/8
+  eth0        192.168.1.253/24
+  wlan0       192.168.1.100/24
+  wg0         10.108.176.1/24
+  tailscale0  100.112.129.32/32
+
+PXE is bound to eth0 only.
+
+
+Installed packages
+------------------
+
+The following packages were installed on the Pi:
+
+  dnsmasq
+  nginx
+  wget
+  tftp-hpa
+
+dnsmasq-base and nginx-common are installed as dependencies.
+
+
+Enabled services
+----------------
+
+Enabled and active:
+
+  dnsmasq
+  nginx
+
+
+Important directories
+---------------------
+
+TFTP root:
+
+  /srv/tftp
+
+HTTP PXE root:
+
+  /var/www/html/pxe
+
+Proxmox HTTP asset directory:
+
+  /var/www/html/pxe/proxmox
+
+
+dnsmasq configuration
+---------------------
+
+Config file:
+
+  /etc/dnsmasq.d/pxe.conf
+
+Current contents:
+
+  # PXE ProxyDHCP for Proxmox recovery boot.
+  # The BGW210 remains the normal DHCP server. dnsmasq only supplies PXE boot info.
+  
+  port=0
+  interface=eth0
+  bind-interfaces
+  log-dhcp
+  
+  dhcp-range=192.168.1.0,proxy,255.255.255.0
+  dhcp-no-override
+  
+  # Internal TFTP only serves the small first-stage boot files.
+  enable-tftp
+  tftp-root=/srv/tftp
+  
+  # PXE services for legacy BIOS and common UEFI x86_64 clients.
+  pxe-service=X86PC,"netboot.xyz BIOS",netboot.xyz.kpxe,192.168.1.253
+  pxe-service=BC_EFI,"netboot.xyz UEFI",netboot.xyz.efi,192.168.1.253
+  pxe-service=X86-64_EFI,"netboot.xyz UEFI",netboot.xyz.efi,192.168.1.253
+
+Expected dnsmasq behavior:
+
+  DNS is disabled by port=0.
+  DHCP is ProxyDHCP only.
+  dnsmasq listens on UDP 67, UDP 69, and UDP 4011.
+  TFTP serves files from /srv/tftp.
+  UEFI x86_64 PXE clients receive netboot.xyz.efi.
+  BIOS PXE clients receive netboot.xyz.kpxe.
+
+Validation commands:
+
+  sudo dnsmasq --test
+  systemctl is-enabled dnsmasq
+  systemctl is-active dnsmasq
+  sudo journalctl -u dnsmasq -f
+  sudo ss -lunp | egrep ':(67|69|4011)\b|dnsmasq'
+
+
+TFTP files
+----------
+
+Files under /srv/tftp:
+
+  /srv/tftp/netboot.xyz.efi
+  /srv/tftp/netboot.xyz.kpxe
+  /srv/tftp/autoexec.ipxe
+  /srv/tftp/proxmox-mac-control.ipxe
+  /srv/tftp/MAC-1062e500178d.ipxe
+  /srv/tftp/MAC-10-62-e5-00-17-8d.ipxe
+  /srv/tftp/MAC-908d6e8c45cf.ipxe
+  /srv/tftp/MAC-90-8d-6e-8c-45-cf.ipxe
+
+Observed sizes and ownership:
+
+  /srv/tftp/netboot.xyz.efi                  1171456 bytes root:root 0644
+  /srv/tftp/netboot.xyz.kpxe                  409436 bytes root:root 0644
+  /srv/tftp/autoexec.ipxe                        769 bytes root:root 0644
+  /srv/tftp/proxmox-mac-control.ipxe             292 bytes root:root 0644
+  /srv/tftp/MAC-1062e500178d.ipxe                292 bytes root:root 0644
+  /srv/tftp/MAC-10-62-e5-00-17-8d.ipxe           292 bytes root:root 0644
+  /srv/tftp/MAC-908d6e8c45cf.ipxe                292 bytes root:root 0644
+  /srv/tftp/MAC-90-8d-6e-8c-45-cf.ipxe           292 bytes root:root 0644
+
+netboot.xyz boot files were downloaded from:
+
+  https://boot.netboot.xyz/ipxe/netboot.xyz.kpxe
+  https://boot.netboot.xyz/ipxe/netboot.xyz.efi
+
+
+PXE MAC policy
+--------------
+
+Known Proxmox recovery MACs:
+
+  pve-temp  10:62:e5:00:17:8d
+  pve-main  90:8d:6e:8c:45:cf
+
+Unknown PXE clients:
+
+  Receive the normal netboot.xyz behavior.
+
+Known Proxmox MACs when disarmed:
+
+  Should not run the installer.
+  Should print a message and reboot, allowing firmware to return to normal
+  UEFI boot order.
+
+Known Proxmox MACs when armed:
+
+  Chain to the Proxmox automated installer iPXE script.
+
+
+/srv/tftp/autoexec.ipxe
+-----------------------
+
+Current contents:
+
+  #!ipxe
+  # netboot.xyz loads this script automatically when present.
+  # Known Proxmox nodes only chain into the destructive installer when explicitly armed.
+  # If disarmed, reboot so UEFI falls back to the normal NVMe/proxmox boot order.
+  # Arm with:    sudo touch /var/www/html/pxe/proxmox/ARMED
+  # Disarm with: sudo rm -f /var/www/html/pxe/proxmox/ARMED
+  
+  set auto_url http://192.168.1.253/pxe/auto-proxmox.ipxe
+  set armed_url http://192.168.1.253/pxe/proxmox/ARMED
+  
+  iseq ${net0/mac} 10:62:e5:00:17:8d && goto maybe_auto ||
+  iseq ${net0/mac} 90:8d:6e:8c:45:cf && goto maybe_auto ||
+  exit
+  
+  :maybe_auto
+  imgfetch --timeout 3000 ${armed_url} && chain ${auto_url} || goto disarmed
+  
+  :disarmed
+  echo Proxmox PXE installer is not armed. Rebooting to normal boot order...
+  sleep 3
+  reboot
+
+Note:
+
+  netboot.xyz did fetch /srv/tftp/autoexec.ipxe during testing, but still
+  proceeded to look for MAC-specific scripts before showing its menu. Because of
+  that, MAC-specific scripts were also created.
+
+
+/srv/tftp/proxmox-mac-control.ipxe
+----------------------------------
+
+Current contents:
+
+  #!ipxe
+  set auto_url http://192.168.1.253/pxe/auto-proxmox.ipxe
+  set armed_url http://192.168.1.253/pxe/proxmox/ARMED
+  imgfetch --timeout 3000 ${armed_url} && chain ${auto_url} || goto disarmed
+  
+  :disarmed
+  echo Proxmox PXE installer is not armed. Rebooting to normal boot order...
+  sleep 3
+  reboot
+
+This file was copied to all known MAC-specific filenames:
+
+  /srv/tftp/MAC-1062e500178d.ipxe
+  /srv/tftp/MAC-10-62-e5-00-17-8d.ipxe
+  /srv/tftp/MAC-908d6e8c45cf.ipxe
+  /srv/tftp/MAC-90-8d-6e-8c-45-cf.ipxe
+
+
+HTTP Proxmox boot assets
+------------------------
+
+Files under /var/www/html/pxe:
+
+  /var/www/html/pxe/auto-proxmox.ipxe
+  /var/www/html/pxe/proxmox/proxmox-auto.iso
+  /var/www/html/pxe/proxmox/vmlinuz
+  /var/www/html/pxe/proxmox/initrd
+
+Observed sizes and ownership:
+
+  /var/www/html/pxe/auto-proxmox.ipxe         299 bytes root:root 0644
+  /var/www/html/pxe/proxmox/proxmox-auto.iso 1706885120 bytes buddy:buddy 0644
+  /var/www/html/pxe/proxmox/vmlinuz            16227432 bytes root:root 0644
+  /var/www/html/pxe/proxmox/initrd             55878409 bytes root:root 0644
+
+The ISO is the prepared Proxmox automated installer ISO. It was produced before
+copying to the Pi. It contains the Cloudflare Worker answer URL.
+
+The kernel and initrd were extracted from the prepared ISO:
+
+  /mnt/boot/linux26     -> /var/www/html/pxe/proxmox/vmlinuz
+  /mnt/boot/initrd.img  -> /var/www/html/pxe/proxmox/initrd
+
+Extraction method used manually:
+
+  sudo mount -o loop,ro /var/www/html/pxe/proxmox/proxmox-auto.iso /mnt
+  sudo cp /mnt/boot/linux26 /var/www/html/pxe/proxmox/vmlinuz
+  sudo cp /mnt/boot/initrd.img /var/www/html/pxe/proxmox/initrd
+  sudo umount /mnt
+  sudo chown root:root /var/www/html/pxe/proxmox/vmlinuz /var/www/html/pxe/proxmox/initrd
+  sudo chmod 0644 /var/www/html/pxe/proxmox/vmlinuz /var/www/html/pxe/proxmox/initrd
+
+
+/var/www/html/pxe/auto-proxmox.ipxe
+-----------------------------------
+
+Current contents:
+
+  #!ipxe
+  dhcp
+  set pxe_base http://192.168.1.253/pxe/proxmox
+  imgfree
+  kernel ${pxe_base}/vmlinuz vga=791 video=vesafb:ywrap,mtrr ramdisk_size=16777216 rw quiet splash=silent proxmox-start-auto-installer initrd=initrd.magic
+  initrd ${pxe_base}/initrd
+  initrd ${pxe_base}/proxmox-auto.iso /proxmox.iso
+  boot
+
+Important:
+
+  The proxmox-start-auto-installer kernel argument is required for automated
+  install behavior when direct-booting through iPXE.
+
+
+ARMED marker
+------------
+
+Marker path:
+
+  /var/www/html/pxe/proxmox/ARMED
+
+When present:
+
+  Known Proxmox MACs chain to /var/www/html/pxe/auto-proxmox.ipxe and start the
+  automated installer.
+
+When absent:
+
+  Known Proxmox MACs should reboot back to normal firmware boot order.
+
+Current intended steady state:
+
+  The ARMED file should be absent.
+
+
+Control script
+--------------
+
+Repo copy:
+
+  pxe-installer-control.sh
+
+Pi copy:
+
+  /home/buddy/pxe-installer-control.sh
+
+Mode:
+
+  executable
+
+Purpose:
+
+  Show current PXE installer status.
+  Arm the installer by creating /var/www/html/pxe/proxmox/ARMED.
+  Disarm the installer by removing /var/www/html/pxe/proxmox/ARMED.
+  Support both interactive and non-interactive usage.
+
+Current contents:
+
+  #!/bin/sh
+  set -eu
+  
+  ARMED_FILE="/var/www/html/pxe/proxmox/ARMED"
+  AUTO_SCRIPT="/srv/tftp/autoexec.ipxe"
+  ISO_FILE="/var/www/html/pxe/proxmox/proxmox-auto.iso"
+  
+  status() {
+    if [ -e "$ARMED_FILE" ]; then
+      echo "PXE installer: ARMED"
+    else
+      echo "PXE installer: disarmed"
+    fi
+  
+    if [ -f "$AUTO_SCRIPT" ]; then
+      echo "autoexec.ipxe: present"
+    else
+      echo "autoexec.ipxe: missing"
+    fi
+  
+    if [ -f "$ISO_FILE" ]; then
+      iso_size="$(du -h "$ISO_FILE" | awk '{print $1}')"
+      echo "Proxmox ISO: present ($iso_size)"
+    else
+      echo "Proxmox ISO: missing"
+    fi
+  }
+  
+  arm() {
+    sudo touch "$ARMED_FILE"
+    sudo chmod 0644 "$ARMED_FILE"
+    echo "PXE installer armed."
+  }
+  
+  disarm() {
+    sudo rm -f "$ARMED_FILE"
+    echo "PXE installer disarmed."
+  }
+  
+  usage() {
+    cat <<EOF
+  Usage: $(basename "$0") [status|arm|disarm]
+  
+  Without arguments, shows status and prompts for an action.
+  EOF
+  }
+  
+  interactive() {
+    status
+    echo
+    printf "Choose action: [a]rm, [d]isarm, [s]tatus, [q]uit: "
+    read -r choice
+  
+    case "$choice" in
+      a|A|arm) arm ;;
+      d|D|disarm) disarm ;;
+      s|S|status) status ;;
+      q|Q|quit|"") exit 0 ;;
+      *) echo "Unknown choice: $choice" >&2; exit 2 ;;
+    esac
+  }
+  
+  case "${1:-}" in
+    "") interactive ;;
+    status) status ;;
+    arm) arm ;;
+    disarm) disarm ;;
+    -h|--help|help) usage ;;
+    *) usage >&2; exit 2 ;;
+  esac
+
+Usage examples:
+
+  /home/buddy/pxe-installer-control.sh
+  /home/buddy/pxe-installer-control.sh status
+  /home/buddy/pxe-installer-control.sh arm
+  /home/buddy/pxe-installer-control.sh disarm
+
+Remote usage examples:
+
+  ssh buddy@192.168.1.253 '/home/buddy/pxe-installer-control.sh status'
+  ssh buddy@192.168.1.253 '/home/buddy/pxe-installer-control.sh arm'
+  ssh buddy@192.168.1.253 '/home/buddy/pxe-installer-control.sh disarm'
+
+Observed status while disarmed:
+
+  PXE installer: disarmed
+  autoexec.ipxe: present
+  Proxmox ISO: present (1.6G)
+
+
+MeshCmd AMT controller
+----------------------
+
+MeshCmd was selected as the AMT command client instead of amttool.
+
+Reason:
+
+  amttool uses the older Intel AMT SOAP interface. Newer AMT versions removed
+  that SOAP support in favor of WS-Management. MeshCmd has AMT remote actions
+  and works against AMT through the MeshCentral/MeshCommander tooling family.
+
+Pi architecture:
+
+  armv6l, 32-bit userspace
+
+MeshCmd binary installed on the Pi:
+
+  /home/buddy/bin/meshcmd
+
+MeshCmd version observed:
+
+  MeshCentral Command (MeshCmd) v1.1.9
+
+MeshCmd download URL used:
+
+  https://meshcentral.com/executables/meshcmd-linux-arm-32
+
+MeshCmd binary details observed:
+
+  ELF 32-bit LSB executable, ARM, EABI5, interpreter /lib/ld-linux-armhf.so.3
+
+MeshCmd AMT scan command:
+
+  /home/buddy/bin/meshcmd amtscan --scan 192.168.1.0/24
+
+AMT endpoints observed during scan:
+
+  192.168.1.47  - Intel AMT v11.8, Activated, 16992
+  192.168.1.200 - Intel AMT v0.0, Activated, 16992
+  192.168.1.230 - Intel AMT v11.0, Activated, 16992
+
+The AMT endpoints still need to be mapped to pve-temp and pve-main before
+enabling automated recovery commands.
+
+Relevant MeshCmd command:
+
+  /home/buddy/bin/meshcmd amtpower \
+    --reset \
+    --bootdevice pxe \
+    --host <amt-host-or-ip> \
+    --user admin \
+    --pass <amt-password>
+
+Optional TLS:
+
+  Add --tls if the AMT endpoint is configured for TLS on port 16993.
+
+
+Recovery wrapper script
+-----------------------
+
+Repo copy:
+
+  proxmox-recover.sh
+
+Pi copy:
+
+  /home/buddy/proxmox-recover.sh
+
+Mode:
+
+  executable
+
+Purpose:
+
+  Provide a phone-friendly SSH entry point for emergency reinstall.
+  Check MeshCmd/PXE status.
+  Scan the LAN for AMT endpoints.
+  Arm the PXE installer.
+  Trigger AMT reset-to-PXE through MeshCmd.
+  Wait a configurable number of seconds.
+  Disarm the PXE installer using a shell trap.
+
+Usage:
+
+  /home/buddy/proxmox-recover.sh status
+  /home/buddy/proxmox-recover.sh scan
+  /home/buddy/proxmox-recover.sh scan 192.168.1.0/24
+  /home/buddy/proxmox-recover.sh recover <node>
+  /home/buddy/proxmox-recover.sh recover <node> <wait-seconds>
+
+Default wait:
+
+  300 seconds
+
+Config directory:
+
+  /home/buddy/.config/proxmox-recover
+
+Config directory mode:
+
+  0700
+
+Nodes config:
+
+  /home/buddy/.config/proxmox-recover/nodes.conf
+
+Nodes config mode:
+
+  0600
+
+nodes.conf format:
+
+  node_name amt_host amt_user password_file tls
+
+Example:
+
+  pve-temp 192.168.1.47 admin /home/buddy/.config/proxmox-recover/amt-password no
+  pve-main 192.168.1.200 admin /home/buddy/.config/proxmox-recover/amt-password no
+
+Password file:
+
+  The wrapper expects the AMT password in a separate file, commonly:
+
+    /home/buddy/.config/proxmox-recover/amt-password
+
+  Suggested mode:
+
+    0600
+
+Current status output observed:
+
+  MeshCmd: /home/buddy/bin/meshcmd
+  MeshCentral Command (MeshCmd)  v1.1.9
+  
+  PXE installer: disarmed
+  autoexec.ipxe: present
+  Proxmox ISO: present (1.6G)
+  
+  Configured nodes:
+
+The nodes config currently contains only commented examples until the AMT host
+mapping and password are provided.
+
+Phone-friendly recovery command, once config is populated:
+
+  ssh buddy@192.168.1.253 '/home/buddy/proxmox-recover.sh recover pve-temp'
+
+The recovery wrapper intentionally does not embed AMT credentials.
+
+
+Boot and recovery behavior
+--------------------------
+
+Normal host boot:
+
+  Proxmox should boot from NVMe via the host UEFI boot entry.
+
+pve-temp UEFI boot order after testing:
+
+  Boot000B  proxmox
+  Boot000C  IPv4 Network
+  Boot000A  IPv6 Network
+  Boot000D  USB
+  followed by firmware utility entries
+
+Command used on pve-temp to set the order:
+
+  efibootmgr -o 000B,000C,000A,000D,0000,0001,0002,0003,0004,0005,0006,0007,0008,0009,000F
+
+One-time IPv4 PXE boot from Proxmox:
+
+  efibootmgr -n 000C
+  reboot
+
+MeshCommander / AMT:
+
+  Reset-to-PXE worked only when PXE/network boot was enabled in firmware. It
+  did not appear to force a disabled PXE boot option on.
+
+Disarmed PXE behavior observed:
+
+  A disarmed boot to PXE reached netboot.xyz, "Boot from HDD" was selected,
+  firmware then tried IPv6 PXE, IPv6 PXE failed, and the system booted Proxmox
+  from NVMe as expected.
+
+Armed PXE behavior observed:
+
+  PXE boot reached netboot.xyz/iPXE.
+  Manual chain to http://192.168.1.253/pxe/auto-proxmox.ipxe worked.
+  Proxmox installer started and completed successfully.
+
+
+Proxmox answer-file flow
+------------------------
+
+The PXE server only provides boot media. The Proxmox answer file is still
+provided by the Cloudflare Worker from this repo.
+
+Worker URL baked into prepared ISO:
+
+  https://pve-answer.bdev.uk/answer
+
+Worker MAC mapping:
+
+  vars/pve_node.txt maps MAC address -> node name
+  vars/<node>.toml provides the answer file served by the Worker
+
+The prepared ISO should be regenerated if the Worker URL changes. The ISO does
+not need to be regenerated when only the GitHub-hosted node map or answer files
+change.
+
+
+Validation checks
+-----------------
+
+Check Pi status:
+
+  ssh buddy@192.168.1.253 '/home/buddy/pxe-installer-control.sh status'
+
+Check dnsmasq:
+
+  ssh buddy@192.168.1.253 'sudo dnsmasq --test'
+  ssh buddy@192.168.1.253 'systemctl is-active dnsmasq'
+  ssh buddy@192.168.1.253 'sudo journalctl -u dnsmasq -f'
+
+Check HTTP assets:
+
+  curl -I http://192.168.1.253/pxe/auto-proxmox.ipxe
+  curl -I http://192.168.1.253/pxe/proxmox/vmlinuz
+  curl -I http://192.168.1.253/pxe/proxmox/initrd
+  curl -I http://192.168.1.253/pxe/proxmox/proxmox-auto.iso
+
+Check local TFTP from the Pi:
+
+  cd /tmp
+  tftp -m binary 127.0.0.1 -c get netboot.xyz.efi
+  cmp -s /tmp/netboot.xyz.efi /srv/tftp/netboot.xyz.efi && echo tftp-binary-file-ok
+
+
+Known caveats
+-------------
+
+The BGW210 does not provide the needed PXE DHCP boot options, so ProxyDHCP on
+the Pi is required.
+
+Do not run the Pi as a full DHCP server on this LAN unless the BGW210 DHCP
+service is disabled or the network is isolated.
+
+The ARMED marker must normally be absent. Leaving it present means known
+Proxmox MACs can boot straight into the destructive automated installer when
+they PXE boot.
+
+netboot.xyz behavior includes extra script lookups. During testing, it looked
+for:
+
+  /srv/tftp/local-vars.ipxe
+  /srv/tftp/MAC-1062e500178d.ipxe
+  /srv/tftp/MAC-10-62-e5-00-17-8d.ipxe
+  /srv/tftp/menu.ipxe
+
+That is why MAC-specific scripts are present in addition to autoexec.ipxe.
