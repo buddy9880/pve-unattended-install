@@ -256,6 +256,17 @@ Bash:
 
 ## Deploy
 
+The easiest option is to deploy and test everything with the helper script. It
+uses the current Git branch for GitHub raw files, reads every MAC address from
+`vars/pve_node.txt`, deploys the Worker, then verifies that each MAC returns its
+matching answer file.
+
+Bash:
+
+    cd /home/buddy/proxmox-recovery-kit
+    ./scripts/update-answer-worker.sh
+
+
 Deploy the Worker to Cloudflare:
 
 PowerShell:

@@ -4,4 +4,4 @@ nodes:
         ip_address: 192.168.1.200
     pve-temp:
         mac_address: 10:62:e5:00:17:8d
-        ip_address: 192.168.1.47
+        ip_address: 192.168.1.240

@@ -702,3 +702,266 @@ for:
   /srv/tftp/menu.ipxe
 
 That is why MAC-specific scripts are present in addition to autoexec.ipxe.
+
+
+Future Ansible setup overview
+-----------------------------
+
+This section is planning material for a later Ansible project. It should not be
+treated as a playbook or task list yet.
+
+The goal for Ansible is to make the PXE recovery server reproducible without
+turning normal configuration runs into recovery actions. A normal configuration
+run should install services, write config files, place boot assets, verify that
+the server is healthy, and leave the destructive installer disarmed.
+
+
+Recovery server identity
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The recovery server should have a stable hostname, probably:
+
+  recovery-server
+
+The current manually built Pi still reports this hostname:
+
+  backupvpn
+
+The current Ethernet recovery address is:
+
+  192.168.1.253
+
+Ansible should avoid scattering this static IP through templates by hand. Use a
+single variable for the recovery server address, such as recovery_server_ip, or
+derive it from the configured PXE interface when that is safe.
+
+In practice, PXE still needs a stable network location. The preferred network
+setup is:
+
+  1. Give the Pi a DHCP reservation on the router for its Ethernet MAC.
+  2. Add or keep a local DNS name for recovery-server.
+  3. Template both the hostname and the resolved/static address into PXE files
+     from one inventory source.
+
+Hostnames are useful for HTTP iPXE URLs if iPXE receives working DNS from DHCP.
+If that proves unreliable during firmware PXE boot, keep the HTTP URLs
+templated from recovery_server_ip instead.
+
+
+Base packages and services
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Ansible should install the packages needed for the current design:
+
+  dnsmasq
+  nginx
+  wget or curl
+  tftp-hpa or another TFTP client for validation
+
+The services that should be enabled and active are:
+
+  dnsmasq
+  nginx
+
+dnsmasq must remain in ProxyDHCP mode only. The BGW210 remains the normal DHCP
+server for the LAN.
+
+
+dnsmasq PXE configuration
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Ansible should manage:
+
+  /etc/dnsmasq.d/pxe.conf
+
+Current behavior to preserve:
+
+  DNS is disabled with port=0.
+  dnsmasq binds to the PXE LAN interface, currently eth0.
+  DHCP behavior is ProxyDHCP only.
+  TFTP is enabled.
+  TFTP root is /srv/tftp.
+  BIOS clients receive netboot.xyz.kpxe.
+  UEFI clients receive netboot.xyz.efi.
+
+The pxe-service lines currently contain the hardcoded recovery server IP. They
+should become templated values:
+
+  pxe-service=X86PC,"netboot.xyz BIOS",netboot.xyz.kpxe,<recovery_server_ip>
+  pxe-service=BC_EFI,"netboot.xyz UEFI",netboot.xyz.efi,<recovery_server_ip>
+  pxe-service=X86-64_EFI,"netboot.xyz UEFI",netboot.xyz.efi,<recovery_server_ip>
+
+
+TFTP boot files
+~~~~~~~~~~~~~~~
+
+Ansible should ensure this directory exists:
+
+  /srv/tftp
+
+Expected first-stage boot files:
+
+  /srv/tftp/netboot.xyz.efi
+  /srv/tftp/netboot.xyz.kpxe
+  /srv/tftp/autoexec.ipxe
+  /srv/tftp/proxmox-mac-control.ipxe
+
+The netboot.xyz files can be downloaded from the upstream URLs already recorded
+in this document, or copied from a controlled local source.
+
+The MAC-specific netboot.xyz hook files should be generated from the node map
+instead of maintained by hand. For each known Proxmox node MAC, create both
+formats that netboot.xyz may request:
+
+  MAC-1062e500178d.ipxe
+  MAC-10-62-e5-00-17-8d.ipxe
+
+The current node map file is:
+
+  vars/pve-node.yml
+
+Known Proxmox MACs should chain into the automated installer only when the
+ARMED marker exists. Unknown PXE clients should continue to normal netboot.xyz
+behavior.
+
+
+HTTP boot assets
+~~~~~~~~~~~~~~~~
+
+Ansible should manage the HTTP PXE root:
+
+  /var/www/html/pxe
+
+Expected Proxmox boot assets:
+
+  /var/www/html/pxe/auto-proxmox.ipxe
+  /var/www/html/pxe/proxmox/proxmox-auto.iso
+  /var/www/html/pxe/proxmox/vmlinuz
+  /var/www/html/pxe/proxmox/initrd
+
+The ISO should already be a prepared Proxmox automated installer ISO. This PXE
+configuration flow should not rebuild the ISO unless that is made a separate,
+explicit role later.
+
+Ansible can either copy the prepared ISO from a known source or verify that the
+expected ISO already exists on the Pi. It should then extract these files from
+the ISO if they are missing or stale:
+
+  /mnt/boot/linux26     -> /var/www/html/pxe/proxmox/vmlinuz
+  /mnt/boot/initrd.img  -> /var/www/html/pxe/proxmox/initrd
+
+The iPXE HTTP script should template the PXE base URL from the same recovery
+server identity data:
+
+  set pxe_base http://recovery-server/pxe/proxmox
+
+or, if hostname resolution is not reliable during iPXE boot:
+
+  set pxe_base http://<recovery_server_ip>/pxe/proxmox
+
+
+Safe default state
+~~~~~~~~~~~~~~~~~~
+
+The ARMED marker is:
+
+  /var/www/html/pxe/proxmox/ARMED
+
+Ansible configuration runs should normally ensure this file is absent.
+
+Leaving this marker present means known Proxmox MACs can boot straight into the
+destructive automated installer when they PXE boot. Creating this file should
+be part of a separate, explicit recovery operation, not routine server setup.
+
+
+Control scripts
+~~~~~~~~~~~~~~~
+
+Ansible should install the repo scripts onto the recovery server:
+
+  scripts/pxe-installer-control.sh -> /home/buddy/pxe-installer-control.sh
+  scripts/proxmox-recover.sh       -> /home/buddy/proxmox-recover.sh
+
+Both scripts should be executable.
+
+The scripts currently assume:
+
+  /home/buddy/bin/meshcmd
+  /home/buddy/.config/proxmox-recover
+  /home/buddy/.config/proxmox-recover/nodes.conf
+
+Those defaults are acceptable for now. Later they can be moved behind a managed
+config file or Ansible variables if the recovery server user or paths change.
+
+
+MeshCmd and AMT support
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Ansible should install MeshCmd at:
+
+  /home/buddy/bin/meshcmd
+
+It should also create:
+
+  /home/buddy/.config/proxmox-recover
+  /home/buddy/.config/proxmox-recover/nodes.conf
+
+The directory should be private. The AMT password should not be embedded in the
+repo or printed by Ansible. Use Ansible Vault or place the password file
+manually with mode 0600.
+
+The recovery wrapper's nodes.conf currently wants this format:
+
+  node_name amt_host amt_user password_file tls
+
+Example shape:
+
+  pve-temp pve-temp-amt admin /home/buddy/.config/proxmox-recover/amt-password no
+  pve-main pve-main-amt admin /home/buddy/.config/proxmox-recover/amt-password no
+
+The AMT endpoint can be a hostname or an IP address. If AMT endpoints are given
+static DHCP leases and DNS names, prefer hostnames. If MeshCmd scans only show
+IP addresses, keep vars/pve-node.yml as the source that associates node names,
+hostnames, LAN IPs, MAC addresses, and AMT endpoints.
+
+A future expanded node map could look like this:
+
+  nodes:
+      pve-main:
+          hostname: pve-main
+          mac_address: 90:8d:6e:8c:45:cf
+          ip_address: 192.168.1.200
+          amt_host: pve-main-amt
+          amt_user: admin
+          amt_tls: false
+
+
+Validation tasks
+~~~~~~~~~~~~~~~~
+
+Ansible can run checks that verify the recovery server without triggering a
+reinstall:
+
+  dnsmasq --test
+  systemctl is-active dnsmasq
+  systemctl is-active nginx
+  /home/buddy/pxe-installer-control.sh status
+
+It can also check HTTP and TFTP assets:
+
+  curl -I http://recovery-server/pxe/auto-proxmox.ipxe
+  curl -I http://recovery-server/pxe/proxmox/vmlinuz
+  curl -I http://recovery-server/pxe/proxmox/initrd
+  curl -I http://recovery-server/pxe/proxmox/proxmox-auto.iso
+
+  cd /tmp
+  tftp -m binary 127.0.0.1 -c get netboot.xyz.efi
+  cmp -s /tmp/netboot.xyz.efi /srv/tftp/netboot.xyz.efi && echo tftp-binary-file-ok
+
+Normal setup validation should not run:
+
+  /home/buddy/pxe-installer-control.sh arm
+  /home/buddy/proxmox-recover.sh recover <node>
+  /home/buddy/bin/meshcmd amtpower --reset --bootdevice pxe ...
+
+Those commands are recovery actions and can reboot or reinstall real machines.

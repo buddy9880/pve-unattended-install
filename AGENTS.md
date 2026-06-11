@@ -191,3 +191,4 @@ When implementing future work, bias toward the desired recovery experience:
 
 The main design goal is reliable emergency recovery with minimal remembered
 context.
+This repo is work in progress and has not been finalized.  Do not update docs unless asked to do so.
